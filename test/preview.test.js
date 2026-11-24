@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { parseHtml, amazonInfo, isPrivateIp, fetchPreview } from '../server/preview.js';
+import { parseHtml, amazonInfo, isPrivateIp, fetchPreview } from '../src/preview.js';
 
 test('parseHtml: Open Graph', () => {
   const html = `<html><head><title>x</title>

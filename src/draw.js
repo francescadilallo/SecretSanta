@@ -1,4 +1,10 @@
-import { randomInt } from 'node:crypto';
+// random uniforme senza bias, portabile (Workers e Node)
+function randomInt(n) {
+  const buf = new Uint32Array(1);
+  const limit = Math.floor(0x100000000 / n) * n;
+  do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+  return buf[0] % n;
+}
 
 function shuffle(arr) {
   const a = arr.slice();

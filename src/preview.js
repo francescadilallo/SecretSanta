@@ -1,15 +1,16 @@
-import dns from 'node:dns/promises';
-import net from 'node:net';
-
 const UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
-const MAX_BYTES = 1_500_000;
+const MAX_BYTES = 500_000; // i meta tag stanno all'inizio; limita anche la CPU
 const MAX_REDIRECTS = 5;
 const TIMEOUT_MS = 8000;
 
 // ---------- sicurezza (SSRF) ----------
+const isIPv4 = (s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
+const isIPv6 = (s) => s.includes(':') && /^[0-9a-f:.]+$/i.test(s);
+const isIP = (s) => isIPv4(s) || isIPv6(s);
+
 export function isPrivateIp(ip) {
-  if (net.isIPv4(ip)) {
+  if (isIPv4(ip)) {
     const [a, b] = ip.split('.').map(Number);
     return (
       a === 10 || a === 127 || a === 0 ||
@@ -20,7 +21,7 @@ export function isPrivateIp(ip) {
       a >= 224
     );
   }
-  if (net.isIPv6(ip)) {
+  if (isIPv6(ip)) {
     const l = ip.toLowerCase();
     if (l.startsWith('::ffff:')) return isPrivateIp(l.slice(7));
     return l === '::1' || l === '::' || l.startsWith('fc') || l.startsWith('fd') || l.startsWith('fe80');
@@ -28,14 +29,12 @@ export function isPrivateIp(ip) {
   return true;
 }
 
+// Nei Workers non c'è DNS lookup, ma fetch() non può comunque raggiungere reti private:
+// qui blocchiamo IP letterali e nomi interni ovvi.
 async function assertPublicHost(hostname, allowPrivate) {
   if (allowPrivate) return;
-  if (net.isIP(hostname)) {
-    if (isPrivateIp(hostname)) throw new Error('Indirizzo non consentito');
-    return;
-  }
-  const addrs = await dns.lookup(hostname, { all: true });
-  if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) {
+  const h = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (isIP(h) ? isPrivateIp(h) : (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || !h.includes('.'))) {
     throw new Error('Indirizzo non consentito');
   }
 }
@@ -152,9 +151,11 @@ async function readLimited(res) {
     chunks.push(value);
     if (total >= MAX_BYTES) { await reader.cancel(); break; }
   }
-  const buf = Buffer.concat(chunks);
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { buf.set(c, off); off += c.length; }
   const cs = /charset=([\w-]+)/i.exec(res.headers.get('content-type') || '')?.[1] || 'utf-8';
-  try { return new TextDecoder(cs).decode(buf); } catch { return buf.toString('utf8'); }
+  try { return new TextDecoder(cs).decode(buf); } catch { return new TextDecoder().decode(buf); }
 }
 
 async function fetchHtml(startUrl, allowPrivate) {

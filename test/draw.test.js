@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { drawNames } from '../server/draw.js';
+import { drawNames } from '../src/draw.js';
 
 test('nessuno pesca se stesso, tutti ricevono una sola volta', () => {
   for (let run = 0; run < 200; run++) {

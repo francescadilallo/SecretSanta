@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Secret Santa PWA: sorteggio segreto e lista dei desideri",
-  "engines": { "node": ">=22.13" },
+  "description": "Secret Santa PWA su Cloudflare Workers + D1: sorteggio segreto e lista dei desideri",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node --watch server/index.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "test": "node --test"
+  },
+  "devDependencies": {
+    "wrangler": "^4.168.0"
   }
 }
