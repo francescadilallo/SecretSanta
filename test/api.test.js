@@ -140,3 +140,39 @@ test('anteprima link: legge titolo, immagine e prezzo dentro il Worker', async (
     assert.equal((await call('POST', `/api/groups/${c.data.code}/preview`, { url }, 'sbagliato')).status, 401);
   } finally { shop.close(); }
 });
+
+test('doppio sorteggio simultaneo: ne riesce uno solo e gli abbinamenti restano coerenti', async () => {
+  const c = await call('POST', '/api/groups', { name: 'Gruppo', adminName: 'Anna', pin: '1234' });
+  const code = c.data.code;
+  const tokens = [c.data.token];
+  for (let i = 1; i <= 9; i++) tokens.push((await call('POST', `/api/groups/${code}/enter`, { name: `Persona${i}`, pin: '1111' })).data.token);
+  const res = await Promise.all(Array.from({ length: 6 }, () => call('POST', `/api/groups/${code}/draw`, {}, c.data.token)));
+  assert.equal(res.filter((r) => r.status === 200).length, 1);
+  const names = [];
+  for (const t of tokens) names.push((await call('GET', `/api/groups/${code}/giftee`, null, t)).data.name);
+  assert.equal(new Set(names).size, 10);
+});
+
+test('30 persone con esclusioni impossibili: risposta rapida e messaggio chiaro', async () => {
+  const c = await call('POST', '/api/groups', { name: 'Trenta', adminName: 'Anna', pin: '1234' });
+  const code = c.data.code;
+  for (let i = 1; i <= 29; i++) await call('POST', `/api/groups/${code}/enter`, { name: `Persona${i}`, pin: '1111' });
+  const me = await call('GET', `/api/groups/${code}/me`, null, c.data.token);
+  const ids = me.data.members.map((m) => m.id);
+  await call('PUT', `/api/groups/${code}/exclusions`, { pairs: ids.slice(1).map((x) => [ids[0], x]) }, c.data.token);
+  const t0 = Date.now();
+  const d = await call('POST', `/api/groups/${code}/draw`, {}, c.data.token);
+  assert.equal(d.status, 400);
+  assert.match(d.data.error, /esclusioni/);
+  assert.ok(Date.now() - t0 < 2000, `troppo lento: ${Date.now() - t0} ms`);
+  // dopo l'errore il gruppo non risulta sorteggiato e si può correggere
+  await call('PUT', `/api/groups/${code}/exclusions`, { pairs: [] }, c.data.token);
+  assert.equal((await call('POST', `/api/groups/${code}/draw`, {}, c.data.token)).status, 200);
+});
+
+test('link Amazon con caratteri malformati: anteprima comunque utilizzabile', async () => {
+  const c = await call('POST', '/api/groups', { name: 'Gruppo', adminName: 'Anna', pin: '1234' });
+  const r = await call('POST', `/api/groups/${c.data.code}/preview`, { url: 'https://www.amazon.it/%E0%A4%A/dp/B0BDHWDR12' }, c.data.token);
+  assert.equal(r.status, 200);
+  assert.ok(r.data.url.endsWith('/dp/B0BDHWDR12'));
+});

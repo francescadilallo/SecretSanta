@@ -437,9 +437,13 @@ function wishSheet(existing, done) {
     <div class="row" style="margin-top:12px"><button type="button" class="ghost" id="cancel">Annulla</button><button class="grow" id="save">Salva</button></div>`);
   const $ = (s) => sheet.querySelector(s);
   const pv = $('#pv');
+  // Lo spazio dell'anteprima ha altezza fissa appena c'è un link: così, quando parte la lettura
+  // del sito, il pulsante Salva non si sposta e il tocco non va perso.
+  const slot = (inner) => { pv.innerHTML = `<div class="preview">${inner}</div>`; };
   const showPv = () => {
-    pv.innerHTML = w.image || w.site ? `<div class="preview"><div class="thumb">${w.image ? `<img src="${esc(w.image)}" alt="" referrerpolicy="no-referrer">` : '🎁'}</div>
-      <div class="grow"><div class="t" style="font-weight:600">${esc($('#title').value || w.title || 'Prodotto')}</div><div class="muted">${esc(w.site || '')}</div></div></div>` : '';
+    if (!$('#url').value.trim()) { pv.innerHTML = ''; return; }
+    slot(`<div class="thumb">${w.image ? `<img src="${esc(w.image)}" alt="" referrerpolicy="no-referrer">` : '🔗'}</div>
+      <div class="grow"><div class="t" style="font-weight:600">${esc($('#title').value || w.title || 'Prodotto')}</div><div class="muted">${esc(w.site || '')}</div></div>`);
   };
   showPv();
   sheet.querySelectorAll('[data-shop]').forEach((b) => b.onclick = () => {
@@ -448,23 +452,33 @@ function wishSheet(existing, done) {
   });
 
   let lastUrl = w.url || '';
-  async function load() {
+  let pending = null;                 // lettura del link in corso
+  let autoTitle = '', autoPrice = ''; // valori compilati in automatico: si sostituiscono solo se non li hai toccati
+  function load() {
     const raw = $('#url').value.trim();
-    if (!raw || raw === lastUrl) return;
+    if (!raw || raw === lastUrl) return pending;
     lastUrl = raw;
-    pv.innerHTML = `<p class="muted"><span class="spinner"></span> Leggo il prodotto…</p>`;
+    slot(`<div class="grow muted"><span class="spinner"></span> Leggo il prodotto…</div>`);
     $('#err').textContent = '';
-    try {
-      const r = await api('POST', `/api/groups/${code}/preview`, { url: raw }, code);
-      Object.assign(w, { url: r.url, image: r.image || '', site: r.site || '' });
-      if (r.title) $('#title').value = r.title;
-      if (r.price) $('#price').value = r.price;
-      $('#url').value = r.url;
-      lastUrl = r.url;
-      showPv();
-      if (!r.title) { pv.insertAdjacentHTML('beforeend', `<p class="muted">Non sono riuscito a leggere il titolo: scrivilo tu qui sotto.</p>`); }
-    } catch (e) { pv.innerHTML = ''; $('#err').textContent = e.message; }
+    pending = (async () => {
+      try {
+        const r = await api('POST', `/api/groups/${code}/preview`, { url: raw }, code);
+        Object.assign(w, { url: r.url, image: r.image || '', site: r.site || '' });
+        const t = $('#title'), pr = $('#price');
+        if (r.title && (!t.value || t.value === autoTitle)) { t.value = r.title; autoTitle = r.title; }
+        if (r.price && (!pr.value || pr.value === autoPrice)) { pr.value = r.price; autoPrice = r.price; }
+        $('#url').value = r.url;
+        lastUrl = r.url;
+        showPv();
+        if (!r.title && !t.value) $('#err').textContent = 'Non sono riuscito a leggere il titolo: scrivilo tu qui sotto.';
+      } catch (e) {
+        slot(`<div class="grow muted">Anteprima non disponibile: puoi salvare lo stesso.</div>`);
+        $('#err').textContent = e.message;
+      } finally { pending = null; }
+    })();
+    return pending;
   }
+  $('#url').addEventListener('input', () => { if ($('#url').value.trim() && !pv.firstChild) slot(`<div class="grow muted">🔗 Link aggiunto</div>`); if (!$('#url').value.trim()) pv.innerHTML = ''; });
   $('#url').addEventListener('change', load);
   $('#url').addEventListener('paste', () => setTimeout(load, 50));
   $('#paste').onclick = async () => {
@@ -473,6 +487,7 @@ function wishSheet(existing, done) {
   };
   $('#cancel').onclick = closeSheet;
   $('#save').onclick = async () => {
+    if (pending) await Promise.race([pending, new Promise((r) => setTimeout(r, 4000))]); // aspetta la lettura del link, ma non all'infinito
     const body = { ...w, title: $('#title').value, price: $('#price').value, note: $('#note').value, url: $('#url').value.trim() };
     try {
       if (existing) await api('PUT', `/api/groups/${code}/wishes/${existing.id}`, body, code);

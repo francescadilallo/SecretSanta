@@ -172,7 +172,7 @@ function makeApi(db, { allowPrivatePreview = false } = {}) {
         const fails = m.fail_count + 1;
         if (fails >= MAX_FAILS) await run('UPDATE members SET fail_count = 0, locked_until = ? WHERE id = ?', now() + LOCK_MS, m.id);
         else await run('UPDATE members SET fail_count = ? WHERE id = ?', fails, m.id);
-        throw new HttpError(401, 'PIN errato');
+        throw new HttpError(401, 'PIN errato. Se sei un\'altra persona con lo stesso nome, usa un nome diverso (es. "Marco R.")');
       }
       if (m.fail_count) await run('UPDATE members SET fail_count = 0 WHERE id = ?', m.id);
       return { token: await newSession(m.id), name: m.name };
@@ -233,10 +233,16 @@ function makeApi(db, { allowPrivatePreview = false } = {}) {
     const ex = (await all('SELECT a, b FROM exclusions WHERE group_id = ?', g.id)).map((e) => [e.a, e.b]);
     const result = drawNames(ids, ex);
     if (!result) throw bad('Impossibile sorteggiare con queste esclusioni: togline qualcuna');
-    await db.batch([
-      ...[...result].map(([giver, receiver]) => stmt('UPDATE members SET gives_to = ? WHERE id = ?', receiver, giver)),
-      stmt('UPDATE groups SET drawn = 1 WHERE id = ?', g.id),
-    ]);
+    // Si "prenota" il sorteggio in modo atomico: due richieste simultanee (doppio tocco)
+    // non possono riuscire entrambe e cambiare gli abbinamenti già visti da qualcuno.
+    const claim = await run('UPDATE groups SET drawn = 1 WHERE id = ? AND drawn = 0', g.id);
+    if (!claim.meta.changes) throw bad('Sorteggio già fatto');
+    try {
+      await db.batch([...result].map(([giver, receiver]) => stmt('UPDATE members SET gives_to = ? WHERE id = ?', receiver, giver)));
+    } catch (e) {
+      await run('UPDATE groups SET drawn = 0 WHERE id = ?', g.id);
+      throw e;
+    }
     return { ok: true }; // l'organizzatore NON vede gli abbinamenti
   });
 

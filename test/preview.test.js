@@ -52,3 +52,28 @@ test('fetchPreview rifiuta localhost di default e legge una pagina locale se con
     assert.ok(!ok.url.includes('utm_source'));
   } finally { srv.close(); }
 });
+
+test('amazonInfo: % malformato nel titolo non lancia errori', () => {
+  const a = amazonInfo('https://www.amazon.it/%E0%A4%A/dp/B0BDHWDR12');
+  assert.equal(a.asin, 'B0BDHWDR12');
+});
+
+test('cleanUrl: toglie solo il tracciamento, non i parametri che cambiano la pagina', async () => {
+  const { cleanUrl } = await import('../src/preview.js');
+  assert.equal(cleanUrl('https://shop.it/cerca?keywords=lego&utm_source=x&fbclid=1&color=rosso'), 'https://shop.it/cerca?keywords=lego&color=rosso');
+});
+
+test('redirect verso un indirizzo interno viene bloccato anche partendo da un host pubblico', async () => {
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (u) => {
+    calls.push(String(u));
+    if (String(u).startsWith('https://shop.example/')) return new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } });
+    return new Response('<meta property="og:title" content="SEGRETO">', { status: 200, headers: { 'content-type': 'text/html' } });
+  };
+  try {
+    const r = await fetchPreview('https://shop.example/x');
+    assert.equal(r.title, undefined);
+    assert.deepEqual(calls, ['https://shop.example/x'], 'non deve richiedere l\'indirizzo interno');
+  } finally { globalThis.fetch = realFetch; }
+});

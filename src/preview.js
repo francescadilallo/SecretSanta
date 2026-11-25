@@ -118,6 +118,10 @@ export function parseHtml(html, baseUrl) {
 }
 
 // ---------- Amazon: fallback senza scraping ----------
+function safeDecode(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
 export function amazonInfo(rawUrl) {
   let u;
   try { u = new URL(rawUrl); } catch { return null; }
@@ -127,7 +131,7 @@ export function amazonInfo(rawUrl) {
   const asin = m[1].toUpperCase();
   const slug = u.pathname.split('/dp/')[0].split('/').filter(Boolean).pop();
   const title = slug && !/^(gp|dp|product)$/i.test(slug)
-    ? decodeURIComponent(slug).replace(/[-_]+/g, ' ').trim()
+    ? safeDecode(slug).replace(/[-_]+/g, ' ').trim()
     : undefined;
   return {
     asin,
@@ -182,7 +186,7 @@ async function fetchHtml(startUrl, allowPrivate) {
 export function cleanUrl(raw) {
   let u = new URL(raw);
   for (const k of [...u.searchParams.keys()]) {
-    if (/^(utm_|fbclid|gclid|ref$|tag$|linkCode|psc$|th$|pd_rd|pf_rd|content-id|qid|sr$|sprefix|crid|keywords)/i.test(k)) u.searchParams.delete(k);
+    if (/^(utm_|fbclid$|gclid$|igshid$|mc_cid$|mc_eid$|ref_src$|spm$)/i.test(k)) u.searchParams.delete(k); // solo tracciamento: mai parametri che cambiano la pagina
   }
   u.hash = '';
   return u.toString();
