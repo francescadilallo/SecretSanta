@@ -50,6 +50,61 @@ document.addEventListener('click', (e) => {
   if (a) { e.preventDefault(); navigate(a.getAttribute('href')); }
 });
 
+
+// ---------- effetti e piccoli helper grafici ----------
+const PALETTE = ['#c8352b', '#1f7a52', '#d98324', '#2f6fb5', '#8a4fb3', '#c2417a', '#2a8f8f', '#7a6a2b'];
+function avatar(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `<span class="avatar" style="background:${PALETTE[h % PALETTE.length]}">${initials(name)}</span>`;
+}
+function countdown(d) {
+  if (!d) return '';
+  const target = new Date(d + 'T00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((target - today) / 864e5);
+  if (isNaN(days) || days < 0) return '';
+  if (days === 0) return 'Oggi! 🎉';
+  if (days === 1) return 'Domani!';
+  return `Mancano ${days} giorni`;
+}
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function initSnow() {
+  if (reduceMotion()) return;
+  const box = document.getElementById('snow');
+  for (let i = 0; i < 26; i++) {
+    const f = document.createElement('i');
+    const size = 2 + Math.random() * 4;
+    f.style.cssText = `left:${Math.random() * 100}%;width:${size}px;height:${size}px;animation-duration:${9 + Math.random() * 12}s;animation-delay:${-Math.random() * 20}s;--dx:${(Math.random() - 0.5) * 80}px`;
+    box.appendChild(f);
+  }
+}
+function confetti() {
+  if (reduceMotion()) return;
+  const cv = document.getElementById('confetti');
+  const ctx = cv.getContext('2d');
+  const dpr = devicePixelRatio || 1;
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  ctx.scale(dpr, dpr);
+  const colors = ['#e8594a', '#1f7a52', '#e9b949', '#ffffff', '#3fb67d'];
+  const ps = Array.from({ length: 120 }, () => ({
+    x: innerWidth / 2, y: innerHeight * 0.45, vx: (Math.random() - 0.5) * 15, vy: -Math.random() * 13 - 4,
+    s: Math.random() * 7 + 4, r: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, c: colors[(Math.random() * colors.length) | 0],
+  }));
+  let frames = 0;
+  (function tick() {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    let alive = 0;
+    for (const p of ps) {
+      p.vy += 0.35; p.vx *= 0.99; p.x += p.vx; p.y += p.vy; p.r += p.vr;
+      if (p.y < innerHeight + 20) alive++;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c;
+      ctx.fillRect(-p.s / 2, -p.s / 3, p.s, p.s * 0.6); ctx.restore();
+    }
+    if (alive && ++frames < 260) requestAnimationFrame(tick); else ctx.clearRect(0, 0, innerWidth, innerHeight);
+  })();
+}
+
 // ---------- bottom sheet ----------
 function openSheet(html, onMount) {
   closeSheet();
@@ -76,17 +131,19 @@ function viewHome() {
   const sessions = store.get();
   const entries = Object.entries(sessions);
   $app.innerHTML = `
-    <div class="hero"><div class="emoji">🎅</div><h1>Secret Santa</h1>
-      <p class="muted">Sorteggio segreto e liste dei desideri, senza spoiler.</p></div>
-    ${entries.length ? `<h2>I tuoi gruppi</h2>` + entries.map(([code, s]) => `
-      <a data-nav href="/g/${code}" class="card row between" style="text-decoration:none;color:inherit">
-        <div><strong>${esc(s.groupName || code)}</strong><div class="muted">Sei ${esc(s.name || '')}</div></div><span>›</span>
-      </a>`).join('') : ''}
+    <div class="banner hero-home"><span class="emoji">🎅</span><h1>Secret Santa</h1>
+      <p>Sorteggio segreto e liste dei desideri, senza spoiler.</p></div>
+    ${entries.length ? `<h2>I tuoi gruppi</h2><div class="home-list">` + entries.map(([code, s]) => `
+      <a data-nav href="/g/${code}" class="card">
+        ${avatar(s.groupName || code)}
+        <div class="grow"><strong>${esc(s.groupName || code)}</strong><div class="muted">Sei ${esc(s.name || '')}</div></div><span class="chev">›</span>
+      </a>`).join('') + `</div>` : ''}
     <h2>Crea un nuovo gruppo</h2>
     <form id="create" class="card">
       <label>Nome del gruppo</label><input name="name" placeholder="Natale in famiglia 2026" required maxlength="60">
       <label>Budget (facoltativo)</label><input name="budget" placeholder="es. 20 €" maxlength="30">
-      <label>Data dello scambio (facoltativa)</label><input name="eventDate" type="date">
+      <label>Data dello scambio (facoltativa)</label><input name="eventDate" type="date" aria-label="Data dello scambio">
+      <p class="muted">Tocca il campo per scegliere il giorno.</p>
       <label>Il tuo nome</label><input name="adminName" placeholder="Francesca" required maxlength="30" autocomplete="given-name">
       <label>Scegli un PIN (4-8 cifre)</label><input name="pin" type="password" inputmode="numeric" pattern="\\d{4,8}" required placeholder="••••" autocomplete="new-password">
       <p class="muted">Il PIN serve per rientrare da un altro dispositivo.</p>
@@ -111,13 +168,13 @@ let tab = 'abbinamento';
 async function viewGroupEntry(code) {
   const s = store.get()[code];
   if (s?.token) return viewGroup(code);
-  $app.innerHTML = `<div class="hero"><div class="emoji">🎁</div><p class="muted">Carico…</p></div>`;
+  $app.innerHTML = `<div class="skeleton" style="height:170px"></div><div class="skeleton"></div>`;
   let info;
   try { info = await api('GET', `/api/groups/${code}/public`); }
   catch { $app.innerHTML = `<div class="empty"><span class="emoji">🤔</span>Gruppo non trovato.<p><a data-nav href="/">Torna alla home</a></p></div>`; return; }
   $app.innerHTML = `
-    <div class="hero"><div class="emoji">🎅</div><h1>${esc(info.name)}</h1>
-      <p class="muted">${info.members} partecipanti${info.budget ? ' · budget ' + esc(info.budget) : ''}${info.eventDate ? ' · ' + fmtDate(info.eventDate) : ''}</p></div>
+    <div class="banner hero-home"><span class="emoji">🎅</span><p style="margin:0;font-weight:700;opacity:.9">Sei stato invitato a</p><h1>${esc(info.name)}</h1>
+      <div class="chips" style="justify-content:center"><span class="pill">👥 ${info.members} ${info.members === 1 ? 'persona' : 'persone'}</span>${info.budget ? `<span class="pill">💶 ${esc(info.budget)}</span>` : ''}${info.eventDate ? `<span class="pill">📅 ${fmtDate(info.eventDate)}</span>` : ''}</div></div>
     <form id="enter" class="card">
       <p>${info.drawn ? 'Il sorteggio è già stato fatto: puoi solo rientrare con nome e PIN.' : 'Scrivi il tuo nome e scegli un PIN. Se sei già dentro, usa gli stessi per rientrare.'}</p>
       <label>Il tuo nome</label><input name="name" required maxlength="30" autocomplete="given-name">
@@ -162,9 +219,16 @@ function render() {
   const { group, me } = ctx;
   const tabs = [['abbinamento', '🎁', 'Il tuo abbinato'], ['lista', '📝', 'La mia lista'], ['gruppo', '👥', 'Gruppo']];
   $app.innerHTML = `
-    <div class="row between"><a data-nav href="/" class="link">‹ Home</a><span class="muted">${esc(me.name)}${me.isAdmin ? ' · organizzatore' : ''}</span></div>
-    <h1>${esc(group.name)}</h1>
-    <p class="muted">${[group.budget && 'Budget ' + esc(group.budget), group.eventDate && fmtDate(group.eventDate)].filter(Boolean).join(' · ')}</p>
+    <div class="banner">
+      <div class="top"><a data-nav href="/" class="back">‹ Home</a><span class="who">${esc(me.name)}${me.isAdmin ? ' · organizzatore' : ''}</span></div>
+      <h1>${esc(group.name)}</h1>
+      <div class="chips">
+        ${group.budget ? `<span class="pill">💶 ${esc(group.budget)}</span>` : ''}
+        ${group.eventDate ? `<span class="pill">📅 ${fmtDate(group.eventDate)}</span>` : ''}
+        ${countdown(group.eventDate) ? `<span class="pill gold">${countdown(group.eventDate)}</span>` : ''}
+        <span class="pill">👥 ${ctx.members.length}</span>
+      </div>
+    </div>
     <div id="pane"></div>
     <nav class="tabs">${tabs.map(([k, ic, l]) => `<button data-tab="${k}" class="${tab === k ? 'on' : ''}"><span class="ic">${ic}</span>${l}</button>`).join('')}</nav>`;
   $app.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
@@ -178,56 +242,68 @@ function render() {
 
 // ----- tab: abbinamento -----
 async function paneAbbinamento(el) {
-  const { group, code } = ctx;
+  const { group, code, members } = ctx;
   if (!group.drawn) {
-    el.innerHTML = `<div class="empty"><span class="emoji">⏳</span><strong>Il sorteggio non è ancora stato fatto.</strong>
-      <p>Intanto scrivi la tua lista dei desideri: chi ti pescherà saprà cosa regalarti.</p>
-      <p><button data-go="lista">Vai alla mia lista</button></p></div>`;
+    el.innerHTML = `
+      <div class="card status"><div class="big">${members.length}</div>
+        <div class="grow"><strong>${members.length === 1 ? 'persona iscritta' : 'persone iscritte'}</strong>
+        <div class="muted">Il sorteggio non è ancora stato fatto${ctx.me.isAdmin ? ': invita gli altri e poi sorteggia dalla scheda Gruppo' : ': aspetta l\'organizzatore'}.</div></div></div>
+      <div class="empty"><span class="emoji">📝</span><strong>Intanto scrivi la tua lista dei desideri</strong>
+        <p>Chi ti pescherà saprà cosa regalarti.</p>
+        <p><button data-go="lista">Vai alla mia lista</button></p></div>`;
     el.querySelector('[data-go]').onclick = () => { tab = 'lista'; render(); };
     return;
   }
-  el.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
+  el.innerHTML = `<div class="skeleton" style="height:236px"></div><div class="skeleton"></div>`;
   let g;
   try { g = await api('GET', `/api/groups/${code}/giftee`, null, code); }
   catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
 
-  const paint = () => {
-    el.innerHTML = `
-      <div class="reveal ${revealed ? 'open' : ''}" id="reveal">
-        ${revealed
-          ? `<div class="emoji">🎁</div><div>Fai il regalo a</div><div class="big">${esc(g.name)}</div><div style="opacity:.85;font-size:14px">Tocca per nascondere</div>`
-          : `<div class="emoji">🤫</div><div class="big">Tocca per scoprire</div><div style="opacity:.85;font-size:14px">a chi farai il regalo</div>`}
-      </div>
-      ${revealed ? `<h2>Desideri di ${esc(g.name)}</h2>${g.wishes.length ? g.wishes.map(wishCard).join('') :
-        `<div class="empty"><span class="emoji">🕵️</span>${esc(g.name)} non ha ancora scritto nulla. Riprova più tardi!</div>`}` : ''}`;
-    el.querySelector('#reveal').onclick = () => { revealed = !revealed; paint(); };
-    el.querySelectorAll('[data-reserve]').forEach((b) => b.addEventListener('click', async () => {
-      const id = Number(b.dataset.reserve);
-      try {
-        const r = await api('POST', `/api/groups/${code}/wishes/${id}/reserve`, {}, code);
-        g.wishes.find((w) => w.id === id).reserved = r.reserved;
-        paint();
-      } catch (e) { toast(e.message); }
-    }));
-  };
   const wishCard = (w) => `
     <div class="card wish ${w.reserved ? 'reserved' : ''}">
       <div class="thumb">${w.image ? `<img src="${esc(w.image)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : '🎁'}</div>
       <div class="grow"><div class="t">${esc(w.title)}</div>
-        <div class="meta">${[w.price && esc(w.price), w.site && esc(w.site)].filter(Boolean).join(' · ')}</div>
-        ${w.note ? `<div class="meta">“${esc(w.note)}”</div>` : ''}
+        ${w.price ? `<span class="price">${esc(w.price)}</span>` : ''}<div class="meta">${esc(w.site || '')}</div>
+        ${w.note ? `<div class="meta note">“${esc(w.note)}”</div>` : ''}
         <div class="actions">
           ${w.url ? `<a class="btn small ghost" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">Apri ↗</a>` : ''}
-          <button class="small ${w.reserved ? 'ghost' : 'green'}" data-reserve="${w.id}">${w.reserved ? 'Segnato come preso ✓' : 'Lo prendo io'}</button>
+          <button class="small ${w.reserved ? 'ghost' : 'green'}" data-reserve="${w.id}">${w.reserved ? 'Preso ✓' : 'Lo prendo io'}</button>
         </div></div>
     </div>`;
-  paint();
+
+  el.innerHTML = `
+    <div class="flip ${revealed ? 'open' : ''}" id="flip"><div class="flip-in" id="reveal">
+      <div class="face front"><div class="tag"><b>Tocca per scoprire</b><span>a chi farai il regalo 🤫</span></div></div>
+      <div class="face back"><div class="emoji">🎁</div><div>Fai il regalo a</div><div class="name">${esc(g.name)}</div><small>Tocca per nascondere</small></div>
+    </div></div>
+    <div class="after-reveal" id="wishes"></div>`;
+
+  const paintWishes = () => {
+    const box = el.querySelector('#wishes');
+    box.innerHTML = `<h2>Desideri di ${esc(g.name)}</h2>${g.wishes.length ? g.wishes.map(wishCard).join('') :
+      `<div class="empty"><span class="emoji">🕵️</span>${esc(g.name)} non ha ancora scritto nulla. Riprova più tardi!</div>`}`;
+    box.querySelectorAll('[data-reserve]').forEach((b) => b.addEventListener('click', async () => {
+      const id = Number(b.dataset.reserve);
+      try {
+        const r = await api('POST', `/api/groups/${code}/wishes/${id}/reserve`, {}, code);
+        g.wishes.find((w) => w.id === id).reserved = r.reserved;
+        paintWishes();
+        if (r.reserved) toast('Segnato come preso ✓');
+      } catch (e) { toast(e.message); }
+    }));
+  };
+  paintWishes();
+  el.querySelector('#reveal').onclick = () => {
+    revealed = !revealed;
+    el.querySelector('#flip').classList.toggle('open', revealed);
+    if (revealed) setTimeout(confetti, 350);
+  };
 }
 
 // ----- tab: la mia lista -----
 async function paneLista(el) {
   const { code } = ctx;
-  el.innerHTML = `<div class="empty"><span class="spinner"></span></div>`;
+  el.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div>`;
   let wishes;
   try { wishes = await api('GET', `/api/groups/${code}/wishes`, null, code); }
   catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
@@ -239,8 +315,8 @@ async function paneLista(el) {
       <div class="card wish">
         <div class="thumb">${w.image ? `<img src="${esc(w.image)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : '🎁'}</div>
         <div class="grow"><div class="t">${esc(w.title)}</div>
-          <div class="meta">${[w.price && esc(w.price), w.site && esc(w.site)].filter(Boolean).join(' · ')}</div>
-          ${w.note ? `<div class="meta">“${esc(w.note)}”</div>` : ''}
+          ${w.price ? `<span class="price">${esc(w.price)}</span>` : ''}<div class="meta">${esc(w.site || '')}</div>
+          ${w.note ? `<div class="meta note">“${esc(w.note)}”</div>` : ''}
           <div class="actions">
             ${w.url ? `<a class="btn small ghost" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">Apri ↗</a>` : ''}
             <button class="small ghost" data-edit="${w.id}">Modifica</button>
@@ -348,7 +424,7 @@ function paneGruppo(el) {
 
     <h2>Partecipanti (${members.length}) ${group.drawn ? '<span class="badge ok">Sorteggio fatto</span>' : ''}</h2>
     <div class="card" style="padding:4px 16px">${members.map((m) => `
-      <div class="pair"><span>${esc(m.name)} ${m.isAdmin ? '<span class="badge">organizzatore</span>' : ''}${m.id === me.id ? ' <span class="muted">(tu)</span>' : ''}</span>
+      <div class="member">${avatar(m.name)}<div class="grow"><strong>${esc(m.name)}</strong> ${m.isAdmin ? '<span class="badge">organizzatore</span>' : ''}${m.id === me.id ? ' <span class="muted">(tu)</span>' : ''}</div>
       ${canEdit && !m.isAdmin ? `<button class="small danger" data-rm="${m.id}">Rimuovi</button>` : ''}</div>`).join('')}</div>
 
     ${canEdit ? `
@@ -391,10 +467,11 @@ function paneGruppo(el) {
   el.querySelectorAll('[data-unex]').forEach((b) => b.onclick = () => saveEx(uniq.filter((_, i) => i !== Number(b.dataset.unex))));
   $('#draw')?.addEventListener('click', async () => {
     if (!confirm('Fare il sorteggio adesso? Non si può annullare.')) return;
-    try { await api('POST', `/api/groups/${code}/draw`, {}, code); tab = 'abbinamento'; revealed = false; viewGroup(code); toast('Sorteggio fatto! 🎉'); }
+    try { await api('POST', `/api/groups/${code}/draw`, {}, code); tab = 'abbinamento'; revealed = false; viewGroup(code); toast('Sorteggio fatto! 🎉'); confetti(); }
     catch (e) { $('#err').textContent = e.message; }
   });
 }
 
+initSnow();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 route();

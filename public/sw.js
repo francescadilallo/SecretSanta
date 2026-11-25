@@ -1,5 +1,5 @@
 // Service worker minimale: guscio dell'app in cache, API sempre dalla rete.
-const CACHE = 'santa-v1';
+const CACHE = 'santa-v2';
 const SHELL = ['/', '/style.css', '/app.js', '/icon.svg', '/manifest.webmanifest'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
