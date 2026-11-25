@@ -1,4 +1,5 @@
 // Secret Santa PWA – frontend senza dipendenze
+import { CATEGORIES, IDEAS } from '/ideas.js';
 const $app = document.getElementById('app');
 const $toast = document.getElementById('toast');
 
@@ -103,6 +104,14 @@ function confetti() {
     }
     if (alive && ++frames < 260) requestAnimationFrame(tick); else ctx.clearRect(0, 0, innerWidth, innerHeight);
   })();
+}
+
+
+// miniatura di un desiderio: immagine del prodotto, altrimenti l'emoji dell'idea regalo
+function thumb(w) {
+  if (w.image) return `<div class="thumb"><img src="${esc(w.image)}" alt="" referrerpolicy="no-referrer" loading="lazy"></div>`;
+  const idea = w.site === 'Idea regalo' ? IDEAS.find((i) => i.title === w.title) : null;
+  return `<div class="thumb">${idea ? idea.e : '🎁'}</div>`;
 }
 
 // ---------- bottom sheet ----------
@@ -261,7 +270,7 @@ async function paneAbbinamento(el) {
 
   const wishCard = (w) => `
     <div class="card wish ${w.reserved ? 'reserved' : ''}">
-      <div class="thumb">${w.image ? `<img src="${esc(w.image)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : '🎁'}</div>
+      ${thumb(w)}
       <div class="grow"><div class="t">${esc(w.title)}</div>
         ${w.price ? `<span class="price">${esc(w.price)}</span>` : ''}<div class="meta">${esc(w.site || '')}</div>
         ${w.note ? `<div class="meta note">“${esc(w.note)}”</div>` : ''}
@@ -309,11 +318,11 @@ async function paneLista(el) {
   catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
 
   el.innerHTML = `
-    <button class="block" id="add">＋ Aggiungi un desiderio</button>
+    <div class="row"><button class="grow" id="add">＋ Aggiungi desiderio</button><button class="ghost" id="ideas">💡 Idee</button></div>
     <p class="muted" style="margin-top:10px">Solo chi ti pescherà vedrà questa lista. Tu non vedrai mai se qualcuno ha già preso qualcosa.</p>
     ${wishes.length ? wishes.map((w) => `
       <div class="card wish">
-        <div class="thumb">${w.image ? `<img src="${esc(w.image)}" alt="" referrerpolicy="no-referrer" loading="lazy">` : '🎁'}</div>
+        ${thumb(w)}
         <div class="grow"><div class="t">${esc(w.title)}</div>
           ${w.price ? `<span class="price">${esc(w.price)}</span>` : ''}<div class="meta">${esc(w.site || '')}</div>
           ${w.note ? `<div class="meta note">“${esc(w.note)}”</div>` : ''}
@@ -322,14 +331,82 @@ async function paneLista(el) {
             <button class="small ghost" data-edit="${w.id}">Modifica</button>
             <button class="small danger" data-del="${w.id}">Elimina</button>
           </div></div>
-      </div>`).join('') : `<div class="empty"><span class="emoji">📝</span>Nessun desiderio ancora.<br>Aggiungi link da Amazon o da qualsiasi negozio!</div>`}`;
+      </div>`).join('') : `<div class="empty"><span class="emoji">📝</span>Nessun desiderio ancora.<br>Incolla un link da qualsiasi negozio oppure sfoglia le idee regalo.<p><button class="green" id="ideas2">💡 Sfoglia le idee</button></p></div>`}`;
   const refresh = () => paneLista(el);
   el.querySelector('#add').onclick = () => wishSheet(null, refresh);
+  el.querySelector('#ideas').onclick = () => ideasSheet(wishes.map((w) => w.title), refresh);
+  el.querySelector('#ideas2')?.addEventListener('click', () => ideasSheet([], refresh));
   el.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => wishSheet(wishes.find((w) => w.id === Number(b.dataset.edit)), refresh));
   el.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
     if (!confirm('Eliminare questo desiderio?')) return;
     try { await api('DELETE', `/api/groups/${code}/wishes/${b.dataset.del}`, null, code); refresh(); } catch (e) { toast(e.message); }
   });
+}
+
+
+// ----- catalogo idee regalo -----
+const norm = (s) => String(s).toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+const budgetNum = (b) => { const m = String(b || '').match(/(\d+(?:[.,]\d+)?)/); return m ? parseFloat(m[1].replace(',', '.')) : null; };
+const shopLink = (q) => `https://www.google.com/search?tbm=shop&hl=it&q=${encodeURIComponent(q)}`;
+const priceLabel = (i) => `${i.min}–${i.max} €`;
+
+function ideasSheet(haveTitles, done) {
+  const { code, group } = ctx;
+  const budget = budgetNum(group.budget);
+  const st = { q: '', cat: 'all', inBudget: budget != null };
+  const added = new Set(haveTitles.map(norm));
+  let count = 0;
+  const sheet = openSheet(`
+    <h2>💡 Idee regalo</h2>
+    <p class="muted">Tocca ＋ per aggiungere un'idea alla tua lista. Chi ti pesca la cercherà nel negozio che preferisce.</p>
+    <div class="sticky-top">
+      <input id="iq" type="search" placeholder="Cerca: tè, cuffie, puzzle…" enterkeyhint="search" autocomplete="off">
+      <div class="chips scroll" id="icats"></div>
+    </div>
+    <div id="ilist"></div>
+    <div class="sticky-bot"><button class="block" id="idone">Fatto</button></div>`);
+  const $ = (q) => sheet.querySelector(q);
+
+  const paint = () => {
+    $('#icats').innerHTML =
+      (budget != null ? `<button type="button" class="chip ${st.inBudget ? 'on' : ''}" data-budget>💶 Nel budget (≤ ${budget} €)</button>` : '') +
+      `<button type="button" class="chip ${st.cat === 'all' ? 'on' : ''}" data-cat="all">Tutte</button>` +
+      CATEGORIES.map((c) => `<button type="button" class="chip ${st.cat === c.id ? 'on' : ''}" data-cat="${c.id}">${c.e} ${esc(c.name)}</button>`).join('');
+    const q = norm(st.q.trim());
+    const list = IDEAS.filter((i) =>
+      (st.cat === 'all' || i.cat === st.cat) &&
+      (!st.inBudget || budget == null || i.min <= budget) &&
+      (!q || norm(i.title).includes(q)));
+    $('#ilist').innerHTML = list.length ? list.map((i) => {
+      const isAdded = added.has(norm(i.title));
+      return `<div class="card idea"><span class="em">${i.e}</span>
+        <div class="grow"><div class="t">${esc(i.title)}</div><div class="meta">${priceLabel(i)}</div></div>
+        <button type="button" class="round ${isAdded ? 'done' : ''}" data-idea="${IDEAS.indexOf(i)}" aria-label="${isAdded ? 'Già aggiunta' : 'Aggiungi'}">${isAdded ? '✓' : '＋'}</button></div>`;
+    }).join('') : `<div class="empty"><span class="emoji">🔍</span>Nessuna idea trovata.<br>Prova un'altra parola${budget != null && st.inBudget ? ' o togli il filtro budget' : ''}.</div>`;
+  };
+  paint();
+
+  $('#iq').addEventListener('input', (e) => { st.q = e.target.value; paint(); });
+  sheet.addEventListener('click', async (e) => {
+    const chip = e.target.closest('[data-cat],[data-budget]');
+    if (chip) {
+      if (chip.hasAttribute('data-budget')) st.inBudget = !st.inBudget; else st.cat = chip.dataset.cat;
+      return paint();
+    }
+    const btn = e.target.closest('[data-idea]');
+    if (!btn || btn.classList.contains('done')) return;
+    const idea = IDEAS[Number(btn.dataset.idea)];
+    btn.disabled = true;
+    try {
+      await api('POST', `/api/groups/${code}/wishes`, {
+        title: idea.title, price: priceLabel(idea), url: shopLink(idea.title), site: 'Idea regalo',
+      }, code);
+      added.add(norm(idea.title)); count++;
+      btn.classList.add('done'); btn.textContent = '✓'; btn.disabled = false;
+      toast(`Aggiunto: ${idea.title}`);
+    } catch (err) { btn.disabled = false; toast(err.message); }
+  });
+  $('#idone').onclick = () => { closeSheet(); if (count) done(); };
 }
 
 const SHOPS = [
